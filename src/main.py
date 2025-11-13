@@ -26,7 +26,7 @@ from poliastro.plotting.interactive import OrbitPlotter3D
 from astropy.coordinates import get_body_barycentric_posvel
 
 
-
+print("hello world")
 
 # Initial date setting
 current_date = compute_julian_date(2015, 2, 8)

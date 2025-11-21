@@ -6,6 +6,7 @@ from math import floor
 import webbrowser, os, sys, re, requests, numpy as np, plotly.io as pio, json
 pio.renderers.default = "browser"
 from jplephem.calendar import compute_julian_date
+import tkinter as tk
 from poliastro.maneuver import Maneuver
 from poliastro.bodies import Earth, Sun
 from poliastro.twobody import Orbit
@@ -28,60 +29,88 @@ import plotly.io as pio
 ########################################################################################################################
 # Function definitions
 ########################################################################################################################
+
+def get_data(url,year):
+    element = [0,0,0,0,0,0]
+    response = requests.get(url)
+    raw_data = response.json()['result']
+    with open('data.txt', 'w') as file:
+        file.write(raw_data)
+    file.close()
+    with open('data.txt', 'r') as f:
+        lines = f.readlines()
+        start_index = 0
+        for i in range(len(lines)):
+            if '$$SOE' in lines[i]:
+                start_index = i
+        if start_index == 0:
+            print('Fatal Error $$SOE not found')
+            return 0
+
+        count = 0
+        for j in range(start_index+1, len(lines)):
+            if count < 2:
+                lines[j] = lines[j].replace("=", " ")
+                if 'EC' in lines[j]:
+                    match = re.search(r"EC\s*([0-9.E+-]+)", lines[j])
+                    element[1] = float(match.group(1))
+                if 'IN' in lines[j]:
+                    match = re.search(r"IN\s*([0-9.E+-]+)", lines[j])
+                    element[2] = float(match.group(1))
+
+                if 'OM' in lines[j]:
+                    match = re.search(r"OM\s*([0-9.E+-]+)", lines[j])
+                    element[4] = float(match.group(1))
+
+                if 'W' in lines[j]:
+                    match = re.search(r"W\s*([0-9.E+-]+)", lines[j])
+                    element[3] = float(match.group(1))
+
+                if 'TA' in lines[j]:
+                    match = re.search(r"TA\s*([0-9.E+-]+)", lines[j])
+                    element[5] = float(match.group(1))
+
+                if ' A ' in lines[j]:
+                    match = re.search(r"A\s*([0-9.E+-]+)", lines[j])
+                    element[0] = float(match.group(1))
+
+                if str(year) in lines[j]:
+                    count += 1
+
+                #print(f'j: {j}')
+                #print(lines[j])
+                #print(element)
+            else:
+                return element
 def get_elements(url):
     # Acquiring and Storing the data as a json file
     response = requests.get(url)
     data = response.json()
-
     # Verify connection was smooth
     if response.status_code != 200:
         print("ERROR GETTING THE DATA")
         sys.exit()
     else:
-        print("Status Code: ", response.status_code) # 200 means everything ok
-
-    # Extracting orbital elements code by Gemini AI, improved by me
+        print(f"Status Code: {response.status_code}, successful") # 200 means everything ok
     start_marker = '$$SOE'
     end_marker = '$$EOE'
-    start_index = data['result'].find(start_marker)
-    end_index = data['result'].find(end_marker)
-    if start_index == -1 or end_index == -1:
-        print("Error: Could not find the $$SOE / $$EOE markers in the response.")
-        exit()
-    # Extract the block (start_index + length of '$$SOE' marker)
-    ephemeris_block = data['result'][start_index + len(start_marker): end_index].strip()
+    pattern_block = r"\$\$SOE\n.*?\n(.*?)(?=\n\d+\.\d+\s=)"
+    match_block = re.search(pattern_block, data, re.DOTALL)
 
-    # Focus on the data for the first date (June 1, 2030)
-    # This is the block starting after $$SOE and ending before the second date
-    first_date_block = ephemeris_block.split('2462654.500000000')[0].strip()
+    if match_block:
+        raw_text = match_block.group(1)
 
-    # Extract the key-value pairs using regular expressions
-    # This regex looks for: two capital letters (the element code, e.g., EC, QR),
-    # followed by an '=' sign and then the floating-point number.
-    elements_dictionnary = {}
-    matches = re.findall(r'(\s[A-Z]{1,2})\s*=\s*([0-9.\-E+]+)', first_date_block)
+        # 2. Parse the key-value pairs from that specific block
+        # Matches things like "EC= 1.23E-02"
+        pattern_values = r'([A-Za-z]+)\s*=\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)'
+        extracted_data = dict(re.findall(pattern_values, raw_text))
 
-    for key, value in matches:
-        # Clean the key (remove leading/trailing spaces) and store as a float
-        elements_dictionnary[key.strip()] = float(value)
-    #   EC      Eccentricity
-    #   QR      Periapsis distance
-    #   IN      Inclination w.r.t. xy-plane (degrees)
-    #   OM      Longitude of Ascending Node (degrees)
-    #   W       Argument of Perifocus (degrees)
-    #   Tp      Periapsis time (user specifies absolute or relative date), not available for 2008 EV5 so not included in the key list
-    #   N       Mean motion (degrees/DU)
-    #   MA      Mean anomaly (degrees)
-    #   TA      True anomaly (degrees)
-    #   A       Semi-major axis
-    #   AD      Apoapsis distance
-    #   PER     Orbital Period or PR ?
+        print("Extracted Data:")
+        for key, value in extracted_data.items():
+            print(f"{key}: {value}")
+    else:
+        print("Pattern not found.")
 
-    KEY_ORDER = ['A', 'EC', 'IN', 'OM', 'W', 'TA', 'QR', 'N', 'MA', 'AD', 'PR'] # a, e, i, RAAN, argp, nu
-    elements_sorted_values = [elements_dictionnary[key] for key in KEY_ORDER]
-    # Storing the values in a numpy array for future use
-    elements = np.array(elements_sorted_values)
-    return elements
 def normalize(v):
     norm = np.sqrt(v[0]**2+v[1]**2+v[2]**2)
     v_norm = v/norm
@@ -178,43 +207,26 @@ def angular_momentum(r,v):
 # Data Collection & Initialization
 ########################################################################################################################
 # Write Horizon ephemeris data to file for faster execution
-flag = 1 # 0 = get data, 1 = load from file
-file = 'data.json'
 
+figure_name = 'orbit'
 # Initial date setting
-year = 2030
+start_year = 2037
+start_month = 6
+start_day = 24
+end_year = start_year+1
+end_month = 6
+end_day = 25
+
+# 2038-02-04 arrival time
 observation_time = 1
-ephemeris_start = compute_julian_date(year = year, month = 6, day = 1)
-ephemeris_stop = compute_julian_date(year = year+observation_time, month= 6, day = 2)
+fast_forward = False # See fast forward in time by latter specified amount of years
 
-ti = Time(ephemeris_start, format = 'jd') # initial time
-tf = Time(ephemeris_stop, format = 'jd') # final time
-
+ti = Time(f'{start_year}-{start_month}-{start_day}', scale = 'utc') # initial time
+tf = Time(f'{start_year+observation_time}-{start_month}-{start_day}', scale = 'utc') # final time
+epochs = time_range(start = ti,end = tf)
 # Url's to connect to jpl Horizon API and retrieve data
-url_2008_ev5 = (
-    "https://ssd.jpl.nasa.gov/api/horizons.api?"
-    + "format=json" + "&"
-    + "COMMAND='DES=2008 EV5'" + "&"
-    + "OBJ_DATA='NO'" + "&"
-    + "MAKE_EPHEM='YES'" + "&"
-    + "CENTER='0'" + "&"
-    + "EPHEM_TYPE='ELEMENTS'" + "&"
-    + "START_TIME='JD"+ str(ephemeris_start) + "'" + "&" #str(launch_date)
-    + "STOP_TIME='JD" + str(ephemeris_stop) + "'" + "&"   # launch
-    + "STEP_SIZE='1 d'"
-)
-url_earth = (
-    "https://ssd.jpl.nasa.gov/api/horizons.api?"
-    + "format=json" + "&"
-    + "COMMAND='399'" + "&"
-    + "OBJ_DATA='NO'" + "&"
-    + "MAKE_EPHEM='YES'" + "&"
-    + "CENTER='0'" + "&"
-    + "EPHEM_TYPE='ELEMENTS'" + "&"
-    + "START_TIME='JD"+ str(ephemeris_start) + "'" + "&" #str(launch_date)
-    + "STOP_TIME='JD" + str(ephemeris_stop) + "'" + "&"   # launch
-    + "STEP_SIZE='1 d'"
-)
+url_2008_ev5 = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='DES=2008 EV5'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start_year}-{start_month}-{start_day}'&STOP_TIME='{end_year}-{end_month}-{end_day}"
+url_earth = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='399'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start_year}-{start_month}-{start_day}'&STOP_TIME='{end_year}-{end_month}-{end_day}"
 
 
 
@@ -224,40 +236,26 @@ url_earth = (
 ########################################################################################################################
 mu_sun = 1.32712440042e11
 mu_earth = 3.986e5
-epochs = time_range(start = ti,end = tf)
-# Orbital Elements lists
-if flag != 1:
-    elements_earth = get_elements(url_earth)
-    elements_asteroid = get_elements(url_2008_ev5)
-    data = {
-        "Earth": elements_earth.tolist(),
-        "Asteroid": elements_asteroid.tolist()
-    }
-    with open(file, 'w') as file:
-        file.write(json.dumps(data, indent=4))
-        elements_earth_radians = elements_earth.copy()
-        elements_asteroid_radians = elements_asteroid.copy()
-        elements_earth_radians[2:6] = np.radians(elements_earth[2:6])
-        elements_asteroid_radians[2:6] = np.radians(elements_asteroid[2:6])
 
-else:
-    with open(file, 'r') as file:
-        data = json.load(file)
-        elements_earth = np.array(data['Earth'])
-        elements_asteroid = np.array(data['Asteroid'])
-        elements_asteroid_radians = elements_asteroid.copy()
-        elements_earth_radians = elements_earth.copy()
-        elements_earth_radians[2:6] = np.radians(elements_earth[2:6])
-        elements_asteroid_radians[2:6] = np.radians(elements_asteroid[2:6])
+# Orbital Elements lists
+
+elements_earth = get_data(url_earth, start_year)
+elements_asteroid = get_data(url_2008_ev5, start_year)
+print(elements_earth, '\n', elements_asteroid)
+elements_earth_radians = elements_earth.copy()
+elements_asteroid_radians = elements_asteroid.copy()
+elements_earth_radians[2:6] = np.radians(elements_earth[2:6])
+elements_asteroid_radians[2:6] = np.radians(elements_asteroid[2:6])
+
 
 
 # Define orbits
-earth = define_orbit(Sun, elements_earth, ti)
-asteroid = define_orbit(Sun, elements_asteroid, ti)
+earth_initial = define_orbit(Sun, elements_earth, ti)
+asteroid_initial = define_orbit(Sun, elements_asteroid, ti)
 
 # Define The orbit that will be seen in the plot after the elapsed ephem time chosen above
-earth_ephem = Ephem.from_orbit(orbit = earth, epochs = epochs)
-asteroid_ephem = Ephem.from_orbit(orbit = asteroid, epochs = epochs)
+earth_ephem = Ephem.from_orbit(orbit = earth_initial, epochs = epochs)
+asteroid_ephem = Ephem.from_orbit(orbit = asteroid_initial, epochs = epochs)
 
 
 
@@ -266,66 +264,43 @@ asteroid_ephem = Ephem.from_orbit(orbit = asteroid, epochs = epochs)
 # Maneuvering
 ########################################################################################################################
 # Determine line of nodes between the two inclined orbits for Bi-Elliptic Transfer calculations
-r_earth, v_earth = earth.rv()
+r_earth, v_earth = earth_initial.rv()
 r_earth, v_earth = r_earth.value, v_earth.value
-r_asteroid, v_asteroid = asteroid.rv()
+r_asteroid, v_asteroid = asteroid_initial.rv()
 r_asteroid, v_asteroid = r_asteroid.value, v_asteroid.value
 h_earth = angular_momentum(r_earth, v_earth)
 h_asteroid = angular_momentum(r_asteroid, v_asteroid)
 n = node_line(h_earth, h_asteroid)
+print(f"node line {normalize(n)}")
 e_earth = eccentricity_vector(mu_sun, r_earth, v_earth)
 w_earth = argument_perigee(n,e_earth)
-dt_ascending, dt_descending = time_to_node_line(elements_earth[0], elements_earth[1], w_earth, elements_earth_radians[5], mu_sun) #elements_earth_radians[5]
-print(f"Time to ascending node: {dt_ascending/86400} days")
-print(f"Time to descending node: {dt_descending/86400} days")
-dt = dt_ascending/86400
+e_asteroid = eccentricity_vector(mu_sun, r_asteroid, v_asteroid)
+w_asteroid = argument_perigee(n, e_asteroid)
+dt_ascending_earth, dt_descending_earth= time_to_node_line(elements_earth[0], elements_earth[1], w_earth, elements_earth_radians[5], mu_sun) #elements_earth_radians[5]
+dt_ascending_asteroid, dt_descending_asteroid = time_to_node_line(elements_asteroid[0], elements_asteroid[1], w_asteroid, elements_asteroid_radians[5], mu_sun)
+print(f"Time to ascending node Earth: {dt_ascending_earth/86400} days")
+print(f"Time to descending node Earth: {dt_descending_earth/86400} days")
+print(f"Time to ascending node Asteroid: {dt_ascending_asteroid/86400} days")
+print(f"Time to descending node Asteroid: {dt_descending_asteroid/86400} days")
+dt = dt_ascending_earth/86400
 transfer_date = ti+dt
 dt /= dt * u.day
 ttf = Time(transfer_date, format = 'jd')
 print(f"Julian transfer date: {ttf.jd}")
 print(f"Date of transfer @ RAAN: {julian_to_current(transfer_date.jd)}")
-# Fast-forward to maneuver date
-earth = earth.propagate(ttf)
-asteroid = asteroid.propagate(ttf)
-r_earth, v_earth = earth.rv()
-r_asteroid, v_asteroid = asteroid.rv()
-v = normalize(v_earth.value)
-print("v=", v)
-dv_tnz = [5, 0.0, 0.0] * u.km/u.s # to calculate! tangential normal -nadir thrust component then rotate it to the pqw
-dv1 = 5*v * u.km/u.s
-dv2 = (0.75*v) * u.km/u.s + [0, 0, 1.75] * u.km/u.s
-impulse1 = Maneuver.impulse(dv1)
-transfer_1 = earth.apply_maneuver(impulse1)
-a = transfer_1.a
-print(a.value)
-dt2 = np.sqrt(a.value**3/mu_sun)*np.pi/2
-transfer_date += dt2
-ttf = Time(transfer_date, format = 'jd')
-transfer_1_end = transfer_1.propagate_to_anomaly(180 * u.deg)
 
-impulse2 = Maneuver.impulse(dv2)
-transfer_2 = transfer_1_end.apply_maneuver(impulse2)
-
-
-
-
-
-phase_angle = np.pi*(1-np.sqrt(((1+r_earth/r_asteroid)/2)**3))
 ########################################################################################################################
 # Plotting
 ########################################################################################################################
 
-fast_forward = 1 # See fast forward in time by latter specified amount of years
+
 plotter = OrbitPlotter3D()
 plotter.set_attractor(Sun)
-
-
-
 
 plotter.plot_ephem(
     earth_ephem,
     ti,
-    label = "Earth @ Launch Position",
+    label = f"Earth @ Launch Position {start_year, start_month, start_day}",
     color = "blue"
 )
 plotter.plot_ephem(
@@ -334,46 +309,8 @@ plotter.plot_ephem(
     label = "Asteroid @ Launch Position",
     color = "orange"
 )
-plotter.plot_maneuver(
-    initial_orbit = earth,
-    maneuver = impulse1,
-    color = "purple",
-    label = "Transfer Orbit 1"
-)
-plotter.plot_maneuver(
-    initial_orbit = transfer_1_end,
-    maneuver = impulse2,
-    color = "green",
-    label = "Transfer Orbit 2"
-)
-
-plotter.plot_trajectory(
-    transfer_1.sample(max_anomaly=180 * u.deg),
-    color = 'purple',
-    label = 'Transfer Orbit 1'
-)
-plotter.plot_trajectory(
-    transfer_2.sample(max_anomaly=360 * u.deg),
-    color = 'green',
-    label = 'Transfer Orbit 2'
-)
 
 
-
-if fast_forward !=1:
-    plotter.plot(
-        asteroid_after,
-        label=f"asteroid after {years} years",
-        color="orange"
-    )
-    plotter.plot(
-        earth_after,
-        label=f"earth after {years} years",
-        color="blue"
-    )
-
-
-#plotter.plot(orb_eagle, label = 'Eagle', color = 'red')
 fig = plotter._figure
-fig.write_html("orbit.html")
-webbrowser.open('file://' + os.path.realpath("orbit.html"))
+fig.write_html(f"figures/{figure_name}.html")
+webbrowser.open('file://' + os.path.realpath(f"figures/{figure_name}.html"))

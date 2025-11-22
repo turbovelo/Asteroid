@@ -1,7 +1,8 @@
 from astropy import units as u
 from astropy.time import Time, TimeDelta
 from astropy.coordinates import solar_system_ephemeris
-import webbrowser,sys, os
+import webbrowser, sys, os
+
 solar_system_ephemeris.set("jpl")
 from jplephem.calendar import compute_julian_date
 from poliastro.plotting import OrbitPlotter3D
@@ -13,6 +14,7 @@ from poliastro.plotting.misc import plot_solar_system
 from poliastro.twobody import Orbit
 from poliastro.util import norm, time_range
 from astropy.coordinates import solar_system_ephemeris
+
 # More info: https://plotly.com/python/renderers/
 from astropy import units as u
 from astropy import time
@@ -58,4 +60,4 @@ plotter.set_view(30 * u.deg, 260 * u.deg, distance=3 * u.km)
 
 fig = plotter._figure
 fig.write_html("orbit.html")
-webbrowser.open('file://' + os.path.realpath("orbit.html"))
+webbrowser.open("file://" + os.path.realpath("orbit.html"))

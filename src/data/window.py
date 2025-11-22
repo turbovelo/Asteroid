@@ -3,6 +3,7 @@ from tkinter import ttk
 from datetime import timedelta
 
 import matplotlib
+
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
@@ -39,6 +40,7 @@ ax.set_ylabel("y [AU]")
 canvas = FigureCanvasTkAgg(fig, master=root)
 canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
+
 # --- Update function linked to slider ---
 def update_plot(val):
     ax.clear()
@@ -67,6 +69,7 @@ def update_plot(val):
     ax.grid(True)
     canvas.draw()
 
+
 # --- Slider (Tkinter Scale) ---
 slider_frame = ttk.Frame(root)
 slider_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -75,11 +78,7 @@ slider_label = ttk.Label(slider_frame, text="Time offset (days):")
 slider_label.pack(side=tk.LEFT)
 
 slider = ttk.Scale(
-    slider_frame,
-    from_=0,
-    to=800,
-    orient="horizontal",
-    command=update_plot
+    slider_frame, from_=0, to=800, orient="horizontal", command=update_plot
 )
 slider.set(0)
 slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)

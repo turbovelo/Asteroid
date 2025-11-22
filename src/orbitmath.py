@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from math import floor
 from typing import List, Tuple
 
@@ -7,6 +8,16 @@ import numpy as np
 from poliastro.bodies import Body
 from poliastro.ephem import Ephem
 from poliastro.twobody import Orbit
+
+
+@dataclass
+class OrbitalElements:
+    A: float = field(default=0)
+    EC: float = field(default=0)
+    IN: float = field(default=0)
+    W: float = field(default=0)
+    OM: float = field(default=0)
+    TA: float = field(default=0)
 
 
 def normalize(v: np.ndarray) -> np.ndarray:

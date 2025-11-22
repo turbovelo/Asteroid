@@ -19,7 +19,7 @@ from poliastro.plotting.interactive import OrbitPlotter3D
 from poliastro.util import time_range
 
 import orbitmath as om
-from data import get_data
+import data
 
 plotly.io.renderers.default = "browser"
 
@@ -54,26 +54,57 @@ if __name__ == "__main__":
     # Write Horizon ephemeris data to file for faster execution
 
     figure_name = "orbit"
+
     # Initial date setting
-    start_year = 2037
-    start_month = 6
-    start_day = 24
-    end_year = start_year + 1
-    end_month = 6
-    end_day = 25
+    START_YEAR = 2037
+    START_MONTH = 6
+    START_DAY = 24
+    END_YEAR = START_YEAR + 1
+    END_MONTH = 6
+    END_DAY = 25
+
+    ID_EARTH = "399"
+    ID_2008_EV5 = "DES=2008 EV5"
+
+    data_earth = data.get(
+        data.Query(
+            ID_EARTH,
+            START_YEAR,
+            START_MONTH,
+            START_DAY,
+            END_YEAR,
+            END_MONTH,
+            END_DAY,
+        )
+    )
+
+    data_2008_ev5 = data.get(
+        data.Query(
+            ID_2008_EV5,
+            START_YEAR,
+            START_MONTH,
+            START_DAY,
+            END_YEAR,
+            END_MONTH,
+            END_DAY,
+        )
+    )
+
+    elements_earth = data.parse(data_earth, START_YEAR)
+    elements_asteroid = data.parse(data_2008_ev5, START_YEAR)
+
+    data.save(elements_earth, "data_earth.json")
+    data.save(elements_asteroid, "data_asteroid.json")
 
     # 2038-02-04 arrival time
     observation_time = 1
     fast_forward = False  # See fast forward in time by latter specified amount of years
 
-    ti = Time(f"{start_year}-{start_month}-{start_day}", scale="utc")  # initial time
+    ti = Time(f"{START_YEAR}-{START_MONTH}-{START_DAY}", scale="utc")  # initial time
     tf = Time(
-        f"{start_year+observation_time}-{start_month}-{start_day}", scale="utc"
+        f"{START_YEAR+observation_time}-{START_MONTH}-{START_DAY}", scale="utc"
     )  # final time
     epochs = time_range(start=ti, end=tf)
-    # Url's to connect to jpl Horizon API and retrieve data
-    url_2008_ev5 = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='DES=2008 EV5'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start_year}-{start_month}-{start_day}'&STOP_TIME='{end_year}-{end_month}-{end_day}"
-    url_earth = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='399'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start_year}-{start_month}-{start_day}'&STOP_TIME='{end_year}-{end_month}-{end_day}"
 
     ########################################################################################################################
     # Poliastro Orbit calculations
@@ -82,11 +113,6 @@ if __name__ == "__main__":
     mu_earth = 3.986e5
 
     # Orbital Elements lists
-
-    elements_earth = get_data(url_earth, start_year)
-    elements_asteroid = get_data(url_2008_ev5, start_year)
-    logging.info(f"{elements_earth=}")
-    logging.info(f"{elements_asteroid=}")
     elements_earth_radians = elements_earth.copy()
     elements_asteroid_radians = elements_asteroid.copy()
     elements_earth_radians[2:6] = np.radians(elements_earth[2:6])
@@ -149,7 +175,7 @@ if __name__ == "__main__":
     plotter.plot_ephem(
         earth_ephem,
         ti,
-        label=f"Earth @ Launch Position {start_year, start_month, start_day}",
+        label=f"Earth @ Launch Position {START_YEAR, START_MONTH, START_DAY}",
         color="blue",
     )
     plotter.plot_ephem(

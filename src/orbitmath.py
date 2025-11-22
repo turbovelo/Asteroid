@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from math import floor
 from typing import List, Tuple
 
-from astropy import units as u
+from astropy import units
 from astropy.time import Time
 import numpy as np
 from poliastro.bodies import Body
@@ -18,6 +18,38 @@ class OrbitalElements:
     W: float = field(default=0)
     OM: float = field(default=0)
     TA: float = field(default=0)
+    NU: float = field(default=0)
+
+    def __post_init__(self):
+        self.degrees = True
+
+    def to_radians(self) -> None:
+        if self.degrees is False:
+            return
+
+        self.A = np.deg2rad(self.A)
+        self.EC = np.deg2rad(self.EC)
+        self.IN = np.deg2rad(self.IN)
+        self.W = np.deg2rad(self.W)
+        self.OM = np.deg2rad(self.OM)
+        self.TA = np.deg2rad(self.TA)
+        self.NU = np.deg2rad(self.NU)
+
+        self.degrees = False
+
+    def to_degrees(self) -> None:
+        if self.degrees is True:
+            return
+
+        self.A = np.rad2deg(self.A)
+        self.EC = np.rad2deg(self.EC)
+        self.IN = np.rad2deg(self.IN)
+        self.W = np.rad2deg(self.W)
+        self.OM = np.rad2deg(self.OM)
+        self.TA = np.rad2deg(self.TA)
+        self.NU = np.rad2deg(self.NU)
+
+        self.degrees = True
 
 
 def normalize(v: np.ndarray) -> np.ndarray:
@@ -59,39 +91,39 @@ def velocity_from_elements_pqw(a: float, e: float, nu: float, mu: float) -> List
     return [p, q, w]
 
 
-def rv_calculation(elements: List[float]) -> Tuple[np.ndarray, np.ndarray]:
-    r = radius_from_elements_pqw(elements[0], elements[1], elements[6]) * u.km
+def rv_calculation(elements: OrbitalElements) -> Tuple[np.ndarray, np.ndarray]:
+    r = radius_from_elements_pqw(elements.A, elements.EC, elements.TA) * units.km
     v = (
-        velocity_from_elements_pqw(elements[0], elements[1], elements[6], mu_sun)
-        * u.km
-        / u.s
+        velocity_from_elements_pqw(elements.A, elements.EC, elements.TA, mu_sun)
+        * units.km
+        / units.s
     )
     return r, v
 
 
-def define_orbit(origin: Body, classical_elements: List[float], epoch: Time):
+def define_orbit(origin: Body, classical_elements: OrbitalElements, epoch: Time):
     orb = Orbit.from_classical(
         origin,
-        classical_elements[0] * u.km,
-        classical_elements[1] * u.one,
-        classical_elements[2] * u.deg,
-        classical_elements[3] * u.deg,
-        classical_elements[4] * u.deg,
-        classical_elements[5] * u.deg,
+        classical_elements.A * units.km,
+        classical_elements.EC * units.one,
+        classical_elements.IN * units.deg,
+        classical_elements.W * units.deg,
+        classical_elements.OM * units.deg,
+        classical_elements.TA * units.deg,
         epoch,
     )
     return orb
 
 
-def define_ephem(origin: Body, classical_elements: List[float]):
+def define_ephem(origin: Body, classical_elements: OrbitalElements):
     orb = Ephem.from_orbit(
         origin,
-        classical_elements[0] * u.km,
-        classical_elements[1] * u.one,
-        classical_elements[2] * u.deg,
-        classical_elements[3] * u.deg,
-        classical_elements[4] * u.deg,
-        classical_elements[5] * u.deg,
+        classical_elements.A * units.km,
+        classical_elements.EC * units.one,
+        classical_elements.IN * units.deg,
+        classical_elements.W * units.deg,
+        classical_elements.OM * units.deg,
+        classical_elements.TA * units.deg,
     )
     return orb
 

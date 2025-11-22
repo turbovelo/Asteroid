@@ -2,9 +2,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field, InitVar, asdict
 import json
 import logging
-import re
 import requests
-from typing import List, Dict
+from typing import Dict
 
 from astropy.time.core import Time
 
@@ -14,28 +13,19 @@ from orbitmath import OrbitalElements
 @dataclass
 class Query:
     body: InitVar[str]
-    start_year: InitVar[int]
-    start_month: InitVar[int]
-    start_day: InitVar[int]
-    end_year: InitVar[int]
-    end_month: InitVar[int]
-    end_day: InitVar[int]
+    start_time: InitVar[Time]
+    stop_time: InitVar[Time]
     url: str = field(init=False)
 
-    def __post_init__(
-        self,
-        body: int,
-        start_year: int,
-        start_month: int,
-        start_day: int,
-        end_year: int,
-        end_month: int,
-        end_day: int,
-    ):
+    def __post_init__(self, body: int, start_time: Time, stop_time: Time):
         """Constructs the query url from the initial inputs."""
 
+        # For easy access to the year, month and day
+        start = start_time.to_datetime()
+        stop = stop_time.to_datetime()
+
         # Url's to connect to jpl Horizon API and retrieve data
-        self.url = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='{body}'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start_year}-{start_month}-{start_day}'&STOP_TIME='{end_year}-{end_month}-{end_day}"
+        self.url = f"https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND='{body}'&OBJ_DATA='NO'&MAKE_EPHEM='YES'&CENTER='500@10'&EPHEM_TYPE='ELEMENTS'&START_TIME='{start.year}-{start.month}-{start.day}'&STOP_TIME='{stop.year}-{stop.month}-{stop.day}"
 
 
 class MarkerNotFoundError(Exception):
@@ -46,7 +36,12 @@ class MarkerNotFoundError(Exception):
 
 def get(query: Query) -> dict:
     logging.info(f'Requesting data from "{query.url}"...')
-    response = requests.get(query.url)
+    response = requests.get(query.url, timeout=10)
+
+    if response.status_code != requests.codes.ok:
+        logging.error("Error while getting the data")
+        response.raise_for_status()
+
     return response.json()
 
 

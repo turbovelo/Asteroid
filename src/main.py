@@ -3,12 +3,13 @@ Author: Konrad Barboutie
 Current date: 2025-11-10
 """
 
-import webbrowser
-import os
-import numpy as np
-import logging
+from copy import deepcopy
 from erfa import ErfaWarning
+import logging
+import numpy as np
+import os
 import warnings
+import webbrowser
 
 from astropy import units as u
 from astropy.time import Time
@@ -59,42 +60,55 @@ if __name__ == "__main__":
     START_YEAR = 2037
     START_MONTH = 6
     START_DAY = 24
-    END_YEAR = START_YEAR + 1
-    END_MONTH = 6
-    END_DAY = 25
+    STOP_YEAR = START_YEAR + 1
+    STOP_MONTH = 6
+    STOP_DAY = 25
+
+    START_TIME = Time(
+        {"year": START_YEAR, "month": START_MONTH, "day": START_DAY}, format="ymdhms"
+    )
+    STOP_TIME = Time(
+        {"year": STOP_YEAR, "month": STOP_MONTH, "day": STOP_DAY}, format="ymdhms"
+    )
 
     ID_EARTH = "399"
     ID_2008_EV5 = "DES=2008 EV5"
 
-    data_earth = data.get(
+    query_earth = data.get(
         data.Query(
             ID_EARTH,
             START_YEAR,
             START_MONTH,
             START_DAY,
-            END_YEAR,
-            END_MONTH,
-            END_DAY,
+            STOP_YEAR,
+            STOP_MONTH,
+            STOP_DAY,
         )
     )
 
-    data_2008_ev5 = data.get(
+    query_2008_ev5 = data.get(
         data.Query(
             ID_2008_EV5,
             START_YEAR,
             START_MONTH,
             START_DAY,
-            END_YEAR,
-            END_MONTH,
-            END_DAY,
+            STOP_YEAR,
+            STOP_MONTH,
+            STOP_DAY,
         )
     )
 
-    elements_earth = data.parse(data_earth, START_YEAR)
-    elements_asteroid = data.parse(data_2008_ev5, START_YEAR)
+    data_earth = data.parse(query_earth)
+    data_asteroid = data.parse(query_2008_ev5)
 
-    data.save(elements_earth, "data_earth.json")
-    data.save(elements_asteroid, "data_asteroid.json")
+    data.save(data_earth, "data_earth.json")
+    data.save(data_asteroid, "data_asteroid.json")
+
+    elements_earth = data.extract(START_TIME, data_earth)
+    elements_asteroid = data.extract(START_TIME, data_asteroid)
+
+    logging.info(f"{elements_earth=}")
+    logging.info(f"{elements_asteroid=}")
 
     # 2038-02-04 arrival time
     observation_time = 1
@@ -113,8 +127,8 @@ if __name__ == "__main__":
     mu_earth = 3.986e5
 
     # Orbital Elements lists
-    elements_earth_radians = elements_earth.copy()
-    elements_asteroid_radians = elements_asteroid.copy()
+    elements_earth_radians = deepcopy(elements_earth)
+    elements_asteroid_radians = deepcopy(elements_asteroid)
     elements_earth_radians[2:6] = np.radians(elements_earth[2:6])
     elements_asteroid_radians[2:6] = np.radians(elements_asteroid[2:6])
 

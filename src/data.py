@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field, fields, InitVar, asdict
+from copy import deepcopy
+from dataclasses import dataclass, field, InitVar, asdict
 import json
 import logging
 import re
@@ -49,7 +50,7 @@ def get(query: Query) -> dict:
     return response.json()
 
 
-def parse(response: dict, year: int) -> Dict[str, OrbitalElements]:
+def parse(response: dict) -> Dict[str, OrbitalElements]:
     if "result" not in response:
         message = "Key 'result' not found in the data!"
         logging.error(message)
@@ -94,7 +95,7 @@ def parse(response: dict, year: int) -> Dict[str, OrbitalElements]:
             for var, val in zip(values[::2], values[1::2]):
 
                 # Skip keys that are not required.
-                if var not in fields(OrbitalElements):
+                if var not in extracted_data[date].keys():
                     continue
 
                 # Sanity check in case parsing screws up
@@ -106,20 +107,22 @@ def parse(response: dict, year: int) -> Dict[str, OrbitalElements]:
                 extracted_data[date][var] = float(val)
 
     # Convert the extracted data to dataclasses
-    for key in extracted_data.keys():
-        extracted_data[key] = OrbitalElements(**extracted_data[key])
+    for key, value in extracted_data.items():
+        extracted_data[key] = OrbitalElements(**value)
 
     return extracted_data
 
 
 def save(elements: dict[str, OrbitalElements], file_name: str) -> None:
-    logging.info(f"{elements=}")
     # Convert the dataclasses to dicts
+    data = deepcopy(elements)
     for key in elements.keys():
-        elements[key] = asdict(elements[key])
+        data[key] = asdict(data[key])
 
     with open(file_name, "w") as file:
-        json.dump(elements, file, indent=4)
+        json.dump(data, file, indent=4)
+
+    logging.info(f"Saved data to {file_name}")
 
 
 def load(file_name: str) -> dict[str, OrbitalElements]:
@@ -130,54 +133,28 @@ def load(file_name: str) -> dict[str, OrbitalElements]:
     for key in data.keys():
         data[key] = OrbitalElements(**data[key])
 
+    logging.info(f"Loaded data from {file_name}")
+
     return data
 
 
-def get_data(url: str, year: int) -> List[float] | None:
-    element = [0, 0, 0, 0, 0, 0]
-    response = requests.get(url)
-    raw_data = response.json()["result"]
-    with open("data.txt", "w") as file:
-        file.write(raw_data)
-    file.close()
-    with open("data.txt", "r") as f:
-        lines = f.readlines()
-        start_index = 0
-        for i in range(len(lines)):
-            if "$$SOE" in lines[i]:
-                start_index = i
-        if start_index == 0:
-            logging.info("Fatal Error $$SOE not found")
-            return 0
+def extract(time: Time, data: [str, OrbitalElements]) -> OrbitalElements:
+    FORMAT = "ymdhms"
+    time.format = FORMAT  # ensure all formats are the same
 
-        count = 0
-        for j in range(start_index + 1, len(lines)):
-            if count < 2:
-                lines[j] = lines[j].replace("=", " ")
-                if "EC" in lines[j]:
-                    match = re.search(r"EC\s*([0-9.E+-]+)", lines[j])
-                    element[1] = float(match.group(1))
-                if "IN" in lines[j]:
-                    match = re.search(r"IN\s*([0-9.E+-]+)", lines[j])
-                    element[2] = float(match.group(1))
+    for date, elements in data.items():
+        # Prepare the date format for comparison
+        date = Time(date, format="jd")
+        date.format = FORMAT
 
-                if "OM" in lines[j]:
-                    match = re.search(r"OM\s*([0-9.E+-]+)", lines[j])
-                    element[4] = float(match.group(1))
+        if date.value != time:
+            continue
 
-                if "W" in lines[j]:
-                    match = re.search(r"W\s*([0-9.E+-]+)", lines[j])
-                    element[3] = float(match.group(1))
+        logging.info(f"Found match for the date: {time.value}")
+        return elements
 
-                if "TA" in lines[j]:
-                    match = re.search(r"TA\s*([0-9.E+-]+)", lines[j])
-                    element[5] = float(match.group(1))
+    logging.warning(
+        f"No match for the date {time.value} was found in the data, returning empty OrbitalElements"
+    )
 
-                if " A " in lines[j]:
-                    match = re.search(r"A\s*([0-9.E+-]+)", lines[j])
-                    element[0] = float(match.group(1))
-
-                if str(year) in lines[j]:
-                    count += 1
-            else:
-                return element
+    return OrbitalElements()

@@ -3,275 +3,29 @@ Author: Konrad Barboutie
 Current date: 2025-11-10
 """
 
-from math import floor
 import webbrowser
 import os
-import sys
-import re
-import requests
 import numpy as np
-import plotly.io as pio
-import json
 import logging
 from erfa import ErfaWarning
 import warnings
-from typing import List, Tuple
 
-pio.renderers.default = "browser"
-from jplephem.calendar import compute_julian_date
-import tkinter as tk
-from poliastro.maneuver import Maneuver
-from poliastro.bodies import Earth, Sun
-from poliastro.twobody import Orbit
-from poliastro.twobody.sampling import EpochsArray, TrueAnomalyBounds, EpochBounds
-from poliastro.util import time_range
-from poliastro.plotting import OrbitPlotter3D
 from astropy import units as u
-from astropy.time import Time, TimeDelta
-from astropy.coordinates import CartesianDifferential, CartesianRepresentation
-from poliastro.plotting.interactive import OrbitPlotter3D
-from poliastro import iod
-from poliastro.bodies import Body, Earth, Mars, Sun
+from astropy.time import Time
+import plotly
+from poliastro.bodies import Sun
 from poliastro.ephem import Ephem
-from poliastro.maneuver import Maneuver
-from poliastro.twobody import Orbit
+from poliastro.plotting.interactive import OrbitPlotter3D
 from poliastro.util import time_range
-from poliastro.core.elements import coe_rotation_matrix, coe2rv
-from poliastro.plotting._base import Trajectory
-import plotly.io as pio
+
+import orbitmath as om
+from data import get_data
+
+plotly.io.renderers.default = "browser"
 
 ########################################################################################################################
 # Function definitions
 ########################################################################################################################
-
-
-def get_data(url: str, year: int) -> List[float] | None:
-    element = [0, 0, 0, 0, 0, 0]
-    response = requests.get(url)
-    raw_data = response.json()["result"]
-    with open("data.txt", "w") as file:
-        file.write(raw_data)
-    file.close()
-    with open("data.txt", "r") as f:
-        lines = f.readlines()
-        start_index = 0
-        for i in range(len(lines)):
-            if "$$SOE" in lines[i]:
-                start_index = i
-        if start_index == 0:
-            logging.info("Fatal Error $$SOE not found")
-            return 0
-
-        count = 0
-        for j in range(start_index + 1, len(lines)):
-            if count < 2:
-                lines[j] = lines[j].replace("=", " ")
-                if "EC" in lines[j]:
-                    match = re.search(r"EC\s*([0-9.E+-]+)", lines[j])
-                    element[1] = float(match.group(1))
-                if "IN" in lines[j]:
-                    match = re.search(r"IN\s*([0-9.E+-]+)", lines[j])
-                    element[2] = float(match.group(1))
-
-                if "OM" in lines[j]:
-                    match = re.search(r"OM\s*([0-9.E+-]+)", lines[j])
-                    element[4] = float(match.group(1))
-
-                if "W" in lines[j]:
-                    match = re.search(r"W\s*([0-9.E+-]+)", lines[j])
-                    element[3] = float(match.group(1))
-
-                if "TA" in lines[j]:
-                    match = re.search(r"TA\s*([0-9.E+-]+)", lines[j])
-                    element[5] = float(match.group(1))
-
-                if " A " in lines[j]:
-                    match = re.search(r"A\s*([0-9.E+-]+)", lines[j])
-                    element[0] = float(match.group(1))
-
-                if str(year) in lines[j]:
-                    count += 1
-            else:
-                return element
-
-
-def get_elements(url: str) -> None:
-    # Acquiring and Storing the data as a json file
-    response = requests.get(url)
-    data = response.json()
-    # Verify connection was smooth
-    if response.status_code != 200:
-        logging.info("ERROR GETTING THE DATA")
-        sys.exit()
-    else:
-        logging.info(
-            f"Status Code: {response.status_code}, successful"
-        )  # 200 means everything ok
-    start_marker = "$$SOE"
-    end_marker = "$$EOE"
-    pattern_block = r"\$\$SOE\n.*?\n(.*?)(?=\n\d+\.\d+\s=)"
-    match_block = re.search(pattern_block, data, re.DOTALL)
-
-    if match_block:
-        raw_text = match_block.group(1)
-
-        # 2. Parse the key-value pairs from that specific block
-        # Matches things like "EC= 1.23E-02"
-        pattern_values = r"([A-Za-z]+)\s*=\s*([-+]?\d*\.\d+(?:[Ee][-+]?\d+)?)"
-        extracted_data = dict(re.findall(pattern_values, raw_text))
-
-        logging.info("Extracted Data:")
-        for key, value in extracted_data.items():
-            logging.info(f"{key}: {value}")
-    else:
-        logging.info("Pattern not found.")
-
-
-def normalize(v: np.ndarray) -> np.ndarray:
-    norm = np.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-    v_norm = v / norm
-    return v_norm
-
-
-def length(v: np.ndarray) -> float:
-    v = np.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-    return v
-
-
-def node_line(x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    return np.cross(x, y)
-
-
-def eccentricity_vector(mu: float, r: np.ndarray, v: np.ndarray) -> np.ndarray:
-    rl = length(r)
-    vl = length(v)
-    e = 1 / mu * ((vl**2 - mu / rl) * r - (np.dot(r, v)) * v)
-    return e
-
-
-def radius_from_elements_pqw(a: float, e: float, nu: float) -> List[float]:
-    r = a * (1 - pow(e, 2)) / (1 + e * np.cos(nu))
-    p = r * np.cos(nu)
-    q = r * np.sin(nu)
-    w = 0
-    return [p, q, w]
-
-
-def velocity_from_elements_pqw(a: float, e: float, nu: float, mu: float) -> List[float]:
-    semi_latus_rectum = a * (1 - pow(e, 2))
-    r = np.sqrt(mu / semi_latus_rectum)
-    p = -r * np.sin(nu)
-    q = r * (e + np.cos(nu))
-    w = 0
-    return [p, q, w]
-
-
-def rv_calculation(elements: List[float]) -> Tuple[np.ndarray, np.ndarray]:
-    r = radius_from_elements_pqw(elements[0], elements[1], elements[6]) * u.km
-    v = (
-        velocity_from_elements_pqw(elements[0], elements[1], elements[6], mu_sun)
-        * u.km
-        / u.s
-    )
-    return r, v
-
-
-def define_orbit(origin: Body, classical_elements: List[float], epoch: Time):
-    orb = Orbit.from_classical(
-        origin,
-        classical_elements[0] * u.km,
-        classical_elements[1] * u.one,
-        classical_elements[2] * u.deg,
-        classical_elements[3] * u.deg,
-        classical_elements[4] * u.deg,
-        classical_elements[5] * u.deg,
-        epoch,
-    )
-    return orb
-
-
-def define_ephem(origin: Body, classical_elements: List[float]):
-    orb = Ephem.from_orbit(
-        origin,
-        classical_elements[0] * u.km,
-        classical_elements[1] * u.one,
-        classical_elements[2] * u.deg,
-        classical_elements[3] * u.deg,
-        classical_elements[4] * u.deg,
-        classical_elements[5] * u.deg,
-    )
-    return orb
-
-
-def sphere_of_influence(m1: float, r: float) -> float:
-    mu = 1.32712440042e11  # mu of sun
-    return r * (m1 / mu) ** (2 / 5)
-
-
-def angular_momentum_normalized(i: float, raan: float) -> np.ndarray:
-    h = [np.sin(i) * np.sin(raan), -np.sin(i) * np.cos(raan), np.cos(i)]
-    return np.array(h)
-
-
-def nu_to_eccentric_anomaly(e: float, nu: float) -> float:
-    E = 2 * np.arctan(np.tan(nu / 2) * np.sqrt((1 - e) / (1 + e)))
-    return E
-
-
-def time_to_node_line(a: float, e: float, w: float, nu: float, mu: float):
-    # nu corresponds to current true anomaly
-    E0 = nu_to_eccentric_anomaly(e, nu)  # Initial E
-    E_asc = nu_to_eccentric_anomaly(e, 2 * np.pi - w)  # Final E
-    E_des = nu_to_eccentric_anomaly(e, np.pi - w)
-    dt_asc = np.sqrt(a**3 / mu) * ((E_asc - e * np.sin(E_asc)) - (E0 - e * np.sin(E0)))
-    dt_des = np.sqrt(a**3 / mu) * ((E_des - e * np.sin(E_des)) - (E0 - e * np.sin(E0)))
-    if dt_asc < 0:
-        dt_asc += np.sqrt(a**3 / mu) * (
-            2 * np.pi + (E_asc - e * np.sin(E_asc)) - (E0 - e * np.sin(E0))
-        )
-    if dt_des < 0:
-        dt_des = np.sqrt(a**3 / mu) * (
-            2 * np.pi + (E_des - e * np.sin(E_des)) - (E0 - e * np.sin(E0))
-        )
-    return dt_asc, dt_des
-
-
-def julian_to_current(jd: float):
-    j = jd + 0.5
-    z = floor(j)
-    alpha = floor((z - 1867216.25) / 36524.25)
-    A = z + 1 + alpha - floor(alpha / 4)
-    B = A + 1524
-    C = floor((B - 122.1) / 365.25)
-    D = floor(365.25 * C)
-    E = floor((B - D) / 30.6001)
-    day = B - D - floor(30.6001 * E)
-    if E < 13:
-        month = E - 1
-    else:
-        month = E - 13
-    if month == 1 or month == 2:
-        year = C - 4716
-    else:
-        year = C - 4715
-    day_int = round(day)
-    date_str = f"{year}-{month:02d}-{day_int:02d}"
-    return date_str
-
-
-def argument_perigee(n: np.ndarray, e: np.ndarray) -> float:
-    nl = length(n)
-    el = length(e)
-    w = np.arccos(np.dot(n, e) / (el * nl))
-    if e[2] < 0:
-        w = w + np.pi
-        return w
-    else:
-        return w
-
-
-def angular_momentum(r: np.ndarray, v: np.ndarray):
-    return np.cross(r, v)
 
 
 if __name__ == "__main__":
@@ -339,8 +93,8 @@ if __name__ == "__main__":
     elements_asteroid_radians[2:6] = np.radians(elements_asteroid[2:6])
 
     # Define orbits
-    earth_initial = define_orbit(Sun, elements_earth, ti)
-    asteroid_initial = define_orbit(Sun, elements_asteroid, ti)
+    earth_initial = om.define_orbit(Sun, elements_earth, ti)
+    asteroid_initial = om.define_orbit(Sun, elements_asteroid, ti)
 
     # Define The orbit that will be seen in the plot after the elapsed ephem time chosen above
     earth_ephem = Ephem.from_orbit(orbit=earth_initial, epochs=epochs)
@@ -354,18 +108,18 @@ if __name__ == "__main__":
     r_earth, v_earth = r_earth.value, v_earth.value
     r_asteroid, v_asteroid = asteroid_initial.rv()
     r_asteroid, v_asteroid = r_asteroid.value, v_asteroid.value
-    h_earth = angular_momentum(r_earth, v_earth)
-    h_asteroid = angular_momentum(r_asteroid, v_asteroid)
-    n = node_line(h_earth, h_asteroid)
-    logging.info(f"node line {normalize(n)}")
-    e_earth = eccentricity_vector(mu_sun, r_earth, v_earth)
-    w_earth = argument_perigee(n, e_earth)
-    e_asteroid = eccentricity_vector(mu_sun, r_asteroid, v_asteroid)
-    w_asteroid = argument_perigee(n, e_asteroid)
-    dt_ascending_earth, dt_descending_earth = time_to_node_line(
+    h_earth = om.angular_momentum(r_earth, v_earth)
+    h_asteroid = om.angular_momentum(r_asteroid, v_asteroid)
+    n = om.node_line(h_earth, h_asteroid)
+    logging.info(f"node line {om.normalize(n)}")
+    e_earth = om.eccentricity_vector(mu_sun, r_earth, v_earth)
+    w_earth = om.argument_perigee(n, e_earth)
+    e_asteroid = om.eccentricity_vector(mu_sun, r_asteroid, v_asteroid)
+    w_asteroid = om.argument_perigee(n, e_asteroid)
+    dt_ascending_earth, dt_descending_earth = om.time_to_node_line(
         elements_earth[0], elements_earth[1], w_earth, elements_earth_radians[5], mu_sun
     )  # elements_earth_radians[5]
-    dt_ascending_asteroid, dt_descending_asteroid = time_to_node_line(
+    dt_ascending_asteroid, dt_descending_asteroid = om.time_to_node_line(
         elements_asteroid[0],
         elements_asteroid[1],
         w_asteroid,
@@ -383,7 +137,7 @@ if __name__ == "__main__":
     dt /= dt * u.day
     ttf = Time(transfer_date, format="jd")
     logging.info(f"Julian transfer date: {ttf.jd}")
-    logging.info(f"Date of transfer @ RAAN: {julian_to_current(transfer_date.jd)}")
+    logging.info(f"Date of transfer @ RAAN: {om.julian_to_current(transfer_date.jd)}")
 
     ########################################################################################################################
     # Plotting
